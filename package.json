@@ -1,0 +1,21 @@
+{
+  "name": "us-expression",
+  "version": "0.0.1",
+  "description": "Expression parser",
+  "main": "index.js",
+  "author": "ulfalfa",
+  "license": "MIT",
+  "eslintConfig": {
+    "extends": [
+      "eslint:recommended",
+      "us-config"
+    ]
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "chai-as-promised": "^6.0.0",
+    "eslint": "^3.19.0",
+    "eslint-config-us-config": "^0.0.1",
+    "mocha": "^3.3.0"
+  }
+}
