@@ -17,24 +17,6 @@ function reduceExpressions(params,value=null, reduceFunc, startVal) {
   });
 }
 
-function identityFunc(value2Promise) {
-  return function $id$(value1Promise)  {
-
-    //value1Promise = Promise.resolve(value1Promise);
-
-
-    return value1Promise().then((value1) => {
-      return value2Promise().then((value2) => {
-        if (typeof value1 !=='undefined') {
-          return (value1===value2)
-        }
-        else {
-          return value2;
-        }
-      });
-    });
-  }
-}
 
 const DEFAULT_FUNCS = {
   "$test": (value,params) => {
@@ -169,29 +151,61 @@ class UsExpression {
     }
   }
 
+
+  identityFunc(resolveFunc, value) {
+    debug ('C$ID$ ResolveFunc',resolveFunc, typeof resolveFunc);
+    debug ('C$ID$ Value',value, typeof value);
+
+    return (checkValue) => {
+      debug ('E$ID$()', checkValue, typeof checkValue);
+      if (typeof checkValue !=='function') {
+        debug ('Since it\'s not a function -> parse');
+        checkValue=this.parse(checkValue);
+      }
+
+      return checkValue(undefined).then((valueToCheck) => {
+        debug ('valueToCheck is', valueToCheck);
+        if (typeof (valueToCheck)==='undefined') {
+          return resolveFunc(value);
+        }
+        else {
+          return resolveFunc(value)
+              .then((valueResolved) => (valueResolved===valueToCheck))
+        }
+      });
+    }
+  }
+
+
   parse(value) {
     debug('-->Parsing', value);
     let retVal;
-    if (isArray(value)) {
-      return this._parseArray(value);
-    }
-    if (typeof value === 'object') {
-      return this._parseObject(value);
-    }
 
-    if (this._funcs.hasOwnProperty(value)) {
+    if (typeof value ==='undefined') {
+      return () => Promise.resolve();
+    }
+    else if (isArray(value)) {
+      retVal = this._parseArray(value);
+    }
+    else if (typeof value === 'object') {
+      retVal = this._parseObject(value);
+    }
+    else if (this._funcs.hasOwnProperty(value)) {
       retVal = this._funcs[value];
     }
     else {
       try {
         let parseResult =Promise.resolve(JSON.parse(value));
-        retVal = identityFunc(() => parseResult);
+        debug (value, 'is a fixed value');
+        retVal = this.identityFunc(Promise.resolve.bind(Promise), parseResult);
       }
       catch (e) {
-        retVal = identityFunc(() => (this._resolve(value)));
+        debug (value, 'seems to be a variable that must be resolved');
+        retVal = this.identityFunc(this._resolve.bind(this), Promise.resolve(value));
       }
     }
     debug('Parsing Result', value, retVal.name);
+    assert (typeof retVal === 'function')
     return retVal;
 
   }

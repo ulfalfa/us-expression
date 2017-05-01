@@ -45,15 +45,20 @@ describe ('USExpression', function () {
   });
 
 
-  describe('handles input variables', function () {
+  describe('parses input values', function () {
 
-    it('can parse a input value (string)',function () {
+
+    it.only('of type string',function () {
       let result = this.exp.parse('"test"');
+      debug('Now we have a parsed function',result);
       expect (result).to.be.a('function');
       return Promise.all([
-        expect(result()).to.become('test'),
-        expect(result('test')).to.be.eventually.equal(true),
-        expect(result('nottest')).to.become(false)
+        //expect(result()).to.become('test'),
+        //expect(result('"test"')).to.be.eventually.equal(true),
+        //expect(result('"nottest"')).to.become(false),
+        expect(result('testString')).to.become(true),
+        //expect(result('bar')).to.become(false)
+
       ]);
     });
     it('can parse a input value (number)',function () {
@@ -74,6 +79,16 @@ describe ('USExpression', function () {
         expect(result(false)).to.become(false)
       ]);
     });
+    it('can parse a input value (variable)',function () {
+      let result = this.exp.parse('testString');
+      expect (result).to.be.a('function');
+      return Promise.all([
+        expect(result()).to.become('test'),
+        expect(result('test')).to.be.eventually.equal(true),
+        expect(result('nottest')).to.become(false)
+      ]);
+    });
+
   });
 
 
@@ -126,7 +141,7 @@ describe ('USExpression', function () {
       result(5)
     ])).to.become([true,true,false]);
   });
-  it.only('is reusable and fetches always new', function () {
+  xit('is reusable and fetches always new', function () {
     variables.testVar= 123;
     let result = this.exp.parse({'$eq':'testVar'});
 
