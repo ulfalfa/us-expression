@@ -29,13 +29,40 @@ const DEFAULT_FUNCS = {
   "$gte": (value, params) => (value >= params),
   "$lt": (value, params) => (value < params),
   "$lte": (value, params) => (value <= params),
-  "$and": (value,params) => {
-    debug ('executing $and', value,params);
-    return reduceExpressions(params,value,(lhs,rhs) => (lhs&&rhs),true)
+  "$in": (value, params) => (params.indexOf(value)>-1),
+  "$nin": (value, params) => (params.indexOf(value)==-1),
+  "$not": (value,params) => !params,
+  "$and": (value,expressions) => {
+    debug ('executing $and', value,expressions);
+    return expressions.reduce((previous, current, index) => {
+      return previous                                    // initiates the promise chain
+        .then((curResult) => {
+          if (curResult) {
+            debug ('Still true - going on')
+            return current(value);
+          }
+          else {
+            return false;
+          }
+        })
+    }, Promise.resolve(true));
+
   },
-  "$or": (value,params) => {
-    debug ('executing $or', value,params);
-    return reduceExpressions(params,value,(lhs,rhs) => (lhs||rhs),false)
+  "$or": (value,expressions) => {
+    debug ('executing $or', value,expressions);
+    return expressions.reduce((previous, current, index) => {
+      return previous                                    // initiates the promise chain
+        .then((curResult) => {
+          if (curResult) {
+            debug('ITS TRUE');
+            return true;
+          }
+          else {
+            debug ('Still false - going on')
+            return current(value);
+          }
+        })
+    }, Promise.resolve(false));
   }
 }
 
@@ -68,151 +95,134 @@ class UsExpression {
     return (this._funcs.hasOwnProperty(value.name));
   }
 
-  _parseArray(aArray) {
-    return () => Promise.resolve(aArray.map((val) => this.parse(val)));
+
+  _compileArray(expressionArray) {
+    assert(isArray(expressionArray), new Error('must be an array'));
+    return expressionArray.map((expression) => this._compile(expression));
   }
 
-  _parseObject(obj) {
-    let keys = Object.keys(obj);
+  _compileObject(funcObject) {
+    assert(typeof funcObject ==='object', new Error('must be an object'));
+    let keys = Object.keys(funcObject);
+    assert(keys.length === 1, new Error('can only have one property'));
 
-    if (keys.length === 1) {
-      let lhs = this.parse(keys[0]);
-      let rhs = this.parse(obj[keys[0]]);
+    let func = this._parseFunction(keys[0]);
+    let parameter = funcObject[keys[0]];
 
-      if (this.isFunction(lhs)) {
-        debug ('LHS is a function %s', lhs.name);
-        return (value) => {
-          return rhs().then((params) => {
-            debug ('Result from function RHS %s', rhs.name, params);
+    if (func.name === "$and" || func.name === "$or") {
+      let arrayOfFunctions = this._compileArray(parameter);
 
-            debug('Calling lhs %s', lhs.name);
-
-
-            let test = lhs(value, params);
-            debug('Result ',test);
-            return test;
-          });
-        }
-      }
-      else {
-        debug ('LHS is a value / $id$ function', lhs);
-        return ((value) => (lhs(rhs)));
-      }
-
-
-      /*
-      if (this.isFunction(rhs)) {
-        throw ('Function on righthand side not allowed');
-      }
-      if (!this.isFunction(lhs)) {
-        //return equality function
-        debug('equality lhs',lhs.name);
-        debug('equality rhs',rhs.name);
-        return () => {
-          return rhs().then((params) => {
-            return lhs().then((value) => {
-              debug('testing equality function',params,value);
-              if (typeof params === 'function') {
-                debug('executing',params,value);
-                return params(value);
-              }
-              else {
-                return params == value;
-              }
-            })
-          })
-
-        };
-      }
-      else if (this.isFunction(lhs)){
-        debug ('Constructing function %s', keys[0],rhs)
-        return (value) => {
-          debug('RHS',rhs);
-          return rhs().then((params) => {
-            debug('FUNCTION',lhs)
-            debug ('Params',value,params);
-
-            let test = lhs(value, params);
-            debug('Result ',test);
-            return test;
-          });
-        }
-      }*/
+      return ((value) => {
+        return this._parseValue(value)
+          .then((value) => (func(value,arrayOfFunctions)));
+      });
 
     }
     else {
-      let andArray=[];
-      for (let prop in obj) {
-        let newQuery = {};
-        newQuery[prop] = obj[prop];
-        andArray.push(newQuery);
-      }
-      return this._parseObject({$and:andArray});
-    }
-  }
-
-
-  identityFunc(resolveFunc, value) {
-    debug ('C$ID$ ResolveFunc',resolveFunc, typeof resolveFunc);
-    debug ('C$ID$ Value',value, typeof value);
-
-    return (checkValue) => {
-      debug ('E$ID$()', checkValue, typeof checkValue);
-      if (typeof checkValue !=='function') {
-        debug ('Since it\'s not a function -> parse');
-        checkValue=this.parse(checkValue);
-      }
-
-      return checkValue(undefined).then((valueToCheck) => {
-        debug ('valueToCheck is', valueToCheck);
-        if (typeof (valueToCheck)==='undefined') {
-          return resolveFunc(value);
-        }
-        else {
-          return resolveFunc(value)
-              .then((valueResolved) => (valueResolved===valueToCheck))
-        }
+      return ((value) => {
+        return this._parse(parameter)
+        .then((paramValue) => {
+          return this._parse(value)
+            .then((value) => func(value, paramValue));
+        });
       });
+
     }
+
+
   }
 
 
-  parse(value) {
-    debug('-->Parsing', value);
+  _compileValueExpression(expression) {
+    return ((value) => {
+      return this._parseValue(expression)
+        .then((expressionValue) => {
+          debug('Value', value);
+          return this._parseValue(value)
+            .then((value) => (value===expressionValue));
+
+        })
+    });
+  }
+
+  _compile(expression) {
+    if (isArray(expression)) {
+      return this._compileArray(expression)
+    }
+    else if (typeof expression === 'object') {
+      return this._compileObject(expression);
+    }
+    else {
+      return this._compileValueExpression(expression);
+    }
+
+  }
+
+  _parseArray(valueArr) {
+
+    return Promise.resolve()
+      .then(() => {
+        assert(isArray(valueArr),new Error('must be an array'));
+        return Promise.all(valueArr.map((value) => (this._parse(value))));
+
+      });
+
+
+  }
+
+  _parseObject(valueObject) {
+    return valueObject;
+  }
+
+  _parseFunction(functionName) {
+    return this._funcs[functionName];
+  }
+
+  _parseStaticValue(value) {
     let retVal;
 
-    if (typeof value ==='undefined') {
-      return () => Promise.resolve();
+    try {
+      let parseResult =JSON.parse(value);
+      retVal = parseResult;
     }
-    else if (isArray(value)) {
-      retVal = this._parseArray(value);
+    catch (e) {
+      retVal = value;
     }
-    else if (typeof value === 'object') {
-      retVal = this._parseObject(value);
-    }
-    else if (this._funcs.hasOwnProperty(value)) {
-      retVal = this._funcs[value];
-    }
-    else {
-      try {
-        let parseResult =Promise.resolve(JSON.parse(value));
-        debug (value, 'is a fixed value');
-        retVal = this.identityFunc(Promise.resolve.bind(Promise), parseResult);
-      }
-      catch (e) {
-        debug (value, 'seems to be a variable that must be resolved');
-        retVal = this.identityFunc(this._resolve.bind(this), Promise.resolve(value));
-      }
-    }
-    debug('Parsing Result', value, retVal.name);
-    assert (typeof retVal === 'function')
     return retVal;
 
   }
 
-  run(query) {
-    throw ('not implemented');
+  _parseValue(value) {
+    let retVal;
+
+    try {
+      let parseResult =Promise.resolve(JSON.parse(value));
+      retVal = parseResult;
+    }
+    catch (e) {
+      retVal = this._resolve(value);
+    }
+    debug ('Value parsed %j->',value,retVal);
+    return retVal;
+
   }
+
+  _parse(value) {
+    if (isArray(value)) {
+      return this._parseArray(value);
+    }
+    else if (typeof value === 'object') {
+      return this._parseObject(value);
+    }
+    else {
+      let retVal = this._parseFunction(value);
+      if (typeof retVal === 'undefined') {
+        retVal = this._parseValue(value)
+      }
+      return retVal;
+    }
+  }
+
 
 }
 
