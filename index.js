@@ -9,7 +9,9 @@ function isPromise(value) {
   return (typeof value.then === 'function');
 }
 
-
+function isFunction(value) {
+  return (typeof value === 'function');
+}
 function isArray(value) {
   return Array.isArray(value);
 }
@@ -37,7 +39,7 @@ const LOGICAL_FUNCS = {
   "$and": (exprArr,parentUsExpr) => {
     assert(isArray(exprArr),'expression for $and must be an array');
 
-    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve)));
+    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve,false)));
 
     return () => {
       return queries.reduce((previous, current, index) => {
@@ -57,7 +59,7 @@ const LOGICAL_FUNCS = {
   "$or": (exprArr,parentUsExpr) => {
     assert(isArray(exprArr),'expression for $or must be an array');
 
-    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve)));
+    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve,false)));
 
     return () => {
       return queries.reduce((previous, current, index) => {
@@ -77,7 +79,7 @@ const LOGICAL_FUNCS = {
   "$not": (expr,parentUsExpr) => {
     //assert(!isObject(expr),'expression for $not must be an object');
 
-    let usExp = new UsExpression(expr, parentUsExpr._resolve);
+    let usExp = new UsExpression(expr, parentUsExpr._resolve,false);
 
     return () => {
       return usExp.test()
@@ -103,12 +105,36 @@ const SIMPLE_FUNCS = {
 
 class UsExpression {
 
-  constructor(query, resolve=null) {
+  constructor(query={}, resolveFunc,caching=true) {
 
-    if (resolve) {
-      this._resolve = resolve;
-    }
+    assert(isFunction(resolveFunc),new Error('resolve function missing'));
+    this._valueCache={};
+    this.$$resolve$$ = resolveFunc;
+
+    this._resolve = (value) => {
+      return caching ? this._cachedResolve(value) : resolveFunc(value);
+    };
+
     this._test = this.compile(query);
+  }
+
+  _cachedResolve(value) {
+    let cachedValue = this._valueCache[value];
+    if (!isUndefined(cachedValue)) {
+      debug('Using cache %s', value)
+      return Promise.resolve(cachedValue);
+    }
+    return this.$$resolve$$(value)
+      .then((resolveValue) => {
+        debug('Resolving %s',value);
+        this._valueCache[value]=resolveValue;
+        return resolveValue;
+      });
+  }
+
+
+  resetCache() {
+    this._valueCache={};
   }
 
 
@@ -148,7 +174,7 @@ class UsExpression {
 
   }
   _compileLogicalOperator(op, expr) {
-    debug ('Operation %s  expr:',op,expr);
+    debug ('Compiling %s(%j)',op,expr);
 
     return LOGICAL_FUNCS[op](expr,this);
 
@@ -157,7 +183,7 @@ class UsExpression {
 
   _compileSimpleOperator(field, op, expr) {
 
-    debug ('Field %s op:%s expr:%s',field,op,expr);
+    debug ('Compiling %s(%s,%s)',op,field,expr);
 
     let func = this._parseFunction(op);
 
@@ -205,13 +231,11 @@ class UsExpression {
       }
     }
 
-    debug ('%d operations in array',compiled.length);
     return () => {
       return compiled.reduce((previous, current, index) => {
         return previous                                    // initiates the promise chain
           .then((curResult) => {
             if (curResult) {
-              debug ('Still true - going on')
               return current();
             }
             else {

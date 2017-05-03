@@ -142,7 +142,7 @@ describe('USExpression', function () {
           {true:true}]});
       return expect(result()).to.become(true);
     });
-    it.only('handles $not operations',function (){
+    it('handles $not operations',function (){
       let result = this.exp.compile(
         {$not:{$or:[
           {6:{$gt:5},false:true},
