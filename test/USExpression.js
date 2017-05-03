@@ -40,211 +40,116 @@ function resolve(varName) {
   return Promise.resolve(variables[varName]);
 }
 
-describe ('USExpression', function () {
+describe('USExpression', function () {
   const USExpression  = require('../index');
 
   before( function () {
-    this.exp = new USExpression(resolve);
+    this.exp = new USExpression({},resolve);
   });
 
-  describe('parsing and compiling of values', function (){
+  describe('_normalize function',function (){
 
-    it('can parse a value', function (){
-      return (Promise.all([
-        expect(this.exp._parseValue()).to.become(undefined),
-        expect(this.exp._parseValue(true)).to.become(true),
-        expect(this.exp._parseValue('true')).to.become(true),
-        expect(this.exp._parseValue(false)).to.become(false),
-        expect(this.exp._parseValue('false')).to.become(false),
-        expect(this.exp._parseValue(123.45)).to.become(123.45),
-        expect(this.exp._parseValue('123.45')).to.become(123.45),
-        expect(this.exp._parseValue('baz')).to.become(6),
-        expect(this.exp._parseValue('"baz"')).to.become('baz'),
-      ]));
+    it('normalizes simple types',function (){
+      expect(this.exp._normalize('test')).to.be.deep.equal({$eq:'test'});
+      expect(this.exp._normalize('"test"')).to.be.deep.equal({$eq:'"test"'});
+      expect(this.exp._normalize(true)).to.be.deep.equal({$eq:true});
+      expect(this.exp._normalize(false)).to.be.deep.equal({$eq:false});
+      expect(this.exp._normalize(123.45)).to.be.deep.equal({$eq:123.45});
     });
-    it('can compile a value to an identity function', function (){
-
-      return (Promise.all([
-        expect(this.exp._compileValueExpression(true)(true)).to.become(true),
-        expect(this.exp._compileValueExpression(true)(false)).to.become(false),
-        expect(this.exp._compileValueExpression(123.45)(123.45)).to.become(true),
-        expect(this.exp._compileValueExpression(123.45)(543.21)).to.become(false),
-        expect(this.exp._compileValueExpression('baz')('baz')).to.become(true),
-        expect(this.exp._compileValueExpression('baz')(6)).to.become(true),
-        expect(this.exp._compileValueExpression('baz')('bar')).to.become(false),
-      ]));
-    });
-    it('the compilation result can be reused and is evaluated again', function (){
-      let expression = this.exp._compileValueExpression('baz');
-      let cases =[];
-      cases.push(expect(expression(6)).to.eventually.be.equal(true));
-      variables.baz = 5;
-      cases.push(expect(expression(6)).to.eventually.be.equal(false));
-      cases.push(expect(expression(5)).to.eventually.be.equal(true));
-      variables.baz = 6;
-      cases.push(expect(expression(6)).to.eventually.be.equal(true));
-      return Promise.resolve(cases);
-    });
-
   });
 
-  describe('built in functions (non logical)', function (){
-    it('it has a $eq function', function (){
-      let expression = this.exp._parseFunction('$eq');
-      expect(expression.name).to.be.equal('$eq');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,3)).to.be.equal(true);
-      expect(expression(3,4)).to.be.equal(false);
-    });
-    it('it has a $neq function', function (){
-      let expression = this.exp._parseFunction('$neq');
-      expect(expression.name).to.be.equal('$neq');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,3)).to.be.equal(false);
-      expect(expression(3,4)).to.be.equal(true);
-    });
-    it('it has a $gt function', function (){
-      let expression = this.exp._parseFunction('$gt');
-      expect(expression.name).to.be.equal('$gt');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,3)).to.be.equal(false);
-      expect(expression(3,4)).to.be.equal(false);
-      expect(expression(4,3)).to.be.equal(true);
-    });
-    it('it has a $gte function', function (){
-      let expression = this.exp._parseFunction('$gte');
-      expect(expression.name).to.be.equal('$gte');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,3)).to.be.equal(true);
-      expect(expression(3,4)).to.be.equal(false);
-      expect(expression(4,3)).to.be.equal(true);
-    });
-    it('it has a $lt function', function (){
-      let expression = this.exp._parseFunction('$lt');
-      expect(expression.name).to.be.equal('$lt');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,3)).to.be.equal(false);
-      expect(expression(3,4)).to.be.equal(true);
-      expect(expression(4,3)).to.be.equal(false);
-    });
-    it('it has a $lte function', function (){
-      let expression = this.exp._parseFunction('$lte');
-      expect(expression.name).to.be.equal('$lte');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,3)).to.be.equal(true);
-      expect(expression(3,4)).to.be.equal(true);
-      expect(expression(4,3)).to.be.equal(false);
-    });
-    it('it has a $in function', function (){
-      let expression = this.exp._parseFunction('$in');
-      expect(expression.name).to.be.equal('$in');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,[1,2,3,4])).to.be.equal(true);
-      expect(expression(3,[1,2,4])).to.be.equal(false);
-    });
-    it('it has a $nin function', function (){
-      let expression = this.exp._parseFunction('$nin');
-      expect(expression.name).to.be.equal('$nin');
-      expect(expression.length).to.be.equal(2);
-      expect(expression(3,[1,2,3,4])).to.be.equal(false);
-      expect(expression(3,[1,2,4])).to.be.equal(true);
-    });
-    it('it has a $not function', function (){
-      let expression = this.exp._parseFunction('$not');
-      expect(expression.name).to.be.equal('$not');
-      expect(expression.length).to.be.equal(2);
-      expect(expression('NOTUSED',true)).to.be.equal(false);
-      expect(expression('NOTUSED',false)).to.be.equal(true);
-    });
-
-
-  });
-  describe('parsing and compiling of functions (non logical)', function (){
-    it('the parses a simple function', function (){
-      let expression = this.exp._parseFunction('$eq');
-      expect(expression.name).to.be.equal('$eq');
-      expect(expression.length).to.be.equal(2);
-    });
-
-
-    it('compiles a function', function () {
-      let expression = this.exp._compileObject({$eq:'baz'});
-      return Promise.all([expect(expression('baz')).to.eventually.be.equal(true),
-        expect(expression(6)).to.eventually.be.equal(true),
-        expect(expression(5)).to.eventually.be.equal(false)]);
-    });
-
-    it('the compilation can be reused', function () {
-      let expression = this.exp._compileObject({$eq:'baz'});
-      let cases =[];
-      cases.push(expect(expression(6)).to.eventually.be.equal(true));
-      variables.baz = 5;
-      cases.push(expect(expression(6)).to.eventually.be.equal(false));
-      cases.push(expect(expression(5)).to.eventually.be.equal(true));
-      variables.baz = 6;
-      cases.push(expect(expression(6)).to.eventually.be.equal(true));
-      return Promise.resolve(cases);
-    });
-
-  });
-  describe('parsing and compiling of arrays', function (){
-    it('parsing arrays', function (){
-      return (Promise.all([
-        expect(this.exp._parseArray()).to.be.rejectedWith(Error,/must be an array/),
-        expect(this.exp._parseArray([])).to.become([]),
-        expect(this.exp._parseArray([true,'baz','"baz"',6,{$eq:6}]))
-          .to.become([true,6,'baz',6,{$eq:6}]),
-      ]));
-
-    });
-    it('compiling arrays undefined/empty', function (){
-      let fn = function () {
-        throw 'checked';
-      }
-      expect(() => {
-        this.exp._compileArray()
-      }).to.throw(/array/);
-      expect(this.exp._compileArray([])).to.be.deep.equal([]);
-
-      let funcArray = this.exp._compileArray(['baz','"bar"',6,true,{$eq:'baz'}]);
-      expect(funcArray.length).to.be.equal(5);
-      expect(funcArray[0]).to.be.a('function');
-      expect(funcArray[1]).to.be.a('function');
-      expect(funcArray[2]).to.be.a('function');
-      expect(funcArray[3]).to.be.a('function');
-      expect(funcArray[4]).to.be.a('function');
-
-      let resultArray = Promise.all(funcArray.map((func) => func(6)));
-      return expect(resultArray).to.become([true,false,true,false,true]);
-
-    });
-
-  });
-  describe('compiling $and / $or function', function (){
-    it('compile $and function', function (){
-      let $andFunc = this.exp._compileObject({$and:['baz',6,{$eq:'baz'},{$gt:5}]});
-      debug('Result of compilation', $andFunc);
+  describe('compilation of simple operations', function () {
+    it('returns $eq function', function (){
+      let testFunc=this.exp._compileSimpleOperator.bind(this.exp);
       return Promise.all([
-        expect($andFunc(6)).to.become(true),
-        expect($andFunc(5)).to.become(false),
+        expect(testFunc('testString','$eq','"test"')()).to.become(true),
+        expect(testFunc(true,'$eq','bar')()).to.become(false)
       ]);
 
     });
-    it('compile $or function', function (){
-      debug ('$OR FUNCTION');
-      let $orFunc = this.exp._compileObject({$or:[{$gt:5},'baz',6,{$eq:'baz'}]});
-      debug('Result of compilation', $orFunc);
-      debug('Result of compilation', $orFunc);
-      debug('Result of compilation', $orFunc);
-      debug('Result of compilation', $orFunc);
+    it('returns $gt function', function (){
+      let testFunc=this.exp._compileSimpleOperator.bind(this.exp);
       return Promise.all([
-        expect($orFunc(5)).to.become(false),
-        expect($orFunc(7)).to.become(true),
-        expect($orFunc(6)).to.become(true),
+        expect(testFunc('baz','$gt',5)()).to.become(true),
+        expect(testFunc(5,'$gt','baz')()).to.become(false)
       ]);
 
     });
+    it('returns $gte function', function (){
+      let testFunc=this.exp._compileSimpleOperator.bind(this.exp);
+      return Promise.all([
+        expect(testFunc('baz','$gte',5)()).to.become(true),
+        expect(testFunc('baz','$gte',6)()).to.become(true),
+        expect(testFunc(5,'$gte','baz')()).to.become(false)
+      ]);
 
+    });
+    it('returns $lt function', function (){
+      let testFunc=this.exp._compileSimpleOperator.bind(this.exp);
+      return Promise.all([
+        expect(testFunc('baz','$lt',5)()).to.become(false),
+        expect(testFunc(5,'$lt','baz')()).to.become(true)
+      ]);
+
+    });
+    it('returns $lte function', function (){
+      let testFunc=this.exp._compileSimpleOperator.bind(this.exp);
+      return Promise.all([
+        expect(testFunc('baz','$lte',5)()).to.become(false),
+        expect(testFunc('baz','$lte',6)()).to.become(true),
+        expect(testFunc(5,'$lte','baz')()).to.become(true)
+      ]);
+
+    });
+    it('returns $in function', function (){
+      let testFunc=this.exp._compileSimpleOperator.bind(this.exp);
+      return Promise.all([
+        expect(testFunc('baz','$in',[6,'baz',5])()).to.become(true),
+        expect(testFunc(6,'$in',['baz',6])()).to.become(true),
+        expect(testFunc(6,'$in',['bar',5])()).to.become(false),
+      ]);
+    });
   });
 
-});
+  describe('compile function',function (){
+
+    it('only accepts objects as query',function (){
+      expect(this.exp.compile.bind(this,'test'))
+      .to.throw(/query must be an object/);
+      expect(this.exp.compile.bind(this,[]))
+      .to.throw(/query must not be an array/);
+    });
+
+    it('handles single field:field',function (){
+      let result = this.exp.compile({'baz':6});
+      return expect(result()).to.become(true);
+    });
+    it('handles multi field:field',function (){
+      let result = this.exp.compile({6:'baz',true:false});
+      return expect(result()).to.become(false);
+    });
+    it('handles multi operations',function (){
+      let result = this.exp.compile(
+        {6:{$gt:5},true:true,
+          $and:[{false:'bar'},{true:true}]});
+      return expect(result()).to.become(true);
+    });
+    it('handles $or operations',function (){
+      let result = this.exp.compile(
+        {$or:[
+          {6:{$gt:5},false:true},
+          {true:'bar'},
+          {true:true}]});
+      return expect(result()).to.become(true);
+    });
+    it.only('handles $not operations',function (){
+      let result = this.exp.compile(
+        {$not:{$or:[
+          {6:{$gt:5},false:true},
+          {true:'bar'},
+          {true:true}]}});
+      return expect(result()).to.become(false);
+    });
+
+  });
+})

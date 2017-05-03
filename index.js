@@ -4,67 +4,6 @@
 const assert = require('assert');
 const debug = require('debug')('us.expression');
 
-function reduceExpressions(params,value=null, reduceFunc, startVal) {
-  debug('REDUCING',params);
-  let promises = params.map ((funcOrPromise) => {
-    return funcOrPromise(value);
-  });
-  debug('promises', promises);
-  return Promise.all(promises)
-  .then((retValues) => {
-    debug ('Now combining', retValues);
-    return retValues.reduce(reduceFunc, startVal);
-  });
-}
-
-
-const DEFAULT_FUNCS = {
-  "$test": (value,params) => {
-    debug ('Testing function', value,params);
-    return true;
-  },
-  "$eq": (value, params) => (value === params),
-  "$neq": (value, params) => (value !== params),
-  "$gt": (value, params) => (value > params),
-  "$gte": (value, params) => (value >= params),
-  "$lt": (value, params) => (value < params),
-  "$lte": (value, params) => (value <= params),
-  "$in": (value, params) => (params.indexOf(value)>-1),
-  "$nin": (value, params) => (params.indexOf(value)==-1),
-  "$not": (value,params) => !params,
-  "$and": (value,expressions) => {
-    debug ('executing $and', value,expressions);
-    return expressions.reduce((previous, current, index) => {
-      return previous                                    // initiates the promise chain
-        .then((curResult) => {
-          if (curResult) {
-            debug ('Still true - going on')
-            return current(value);
-          }
-          else {
-            return false;
-          }
-        })
-    }, Promise.resolve(true));
-
-  },
-  "$or": (value,expressions) => {
-    debug ('executing $or', value,expressions);
-    return expressions.reduce((previous, current, index) => {
-      return previous                                    // initiates the promise chain
-        .then((curResult) => {
-          if (curResult) {
-            debug('ITS TRUE');
-            return true;
-          }
-          else {
-            debug ('Still false - going on')
-            return current(value);
-          }
-        })
-    }, Promise.resolve(false));
-  }
-}
 
 function isPromise(value) {
   return (typeof value.then === 'function');
@@ -75,125 +14,127 @@ function isArray(value) {
   return Array.isArray(value);
 }
 
+function isObject(value) {
+  return (typeof value ==='object');
+}
+
+function isUndefined(value) {
+  return (typeof value ==='undefined');
+}
+
+
+function isSimpleType(expr) {
+  let type = typeof expr;
+  return (
+    type==='string' ||
+    type==='number' ||
+    type==='boolean'
+  );
+}
+
+
+const LOGICAL_FUNCS = {
+  "$and": (exprArr,parentUsExpr) => {
+    assert(isArray(exprArr),'expression for $and must be an array');
+
+    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve)));
+
+    return () => {
+      return queries.reduce((previous, current, index) => {
+        return previous
+          .then((curResult) => {
+            if (curResult) {
+              return current.test();
+            }
+            else {
+              return false;
+            }
+          })
+      },(Promise.resolve(true)));
+
+    };
+  },
+  "$or": (exprArr,parentUsExpr) => {
+    assert(isArray(exprArr),'expression for $or must be an array');
+
+    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve)));
+
+    return () => {
+      return queries.reduce((previous, current, index) => {
+        return previous
+          .then((curResult) => {
+            if (!curResult) {
+              return current.test();
+            }
+            else {
+              return true;
+            }
+          })
+      },(Promise.resolve(false)));
+
+    };
+  },
+  "$not": (expr,parentUsExpr) => {
+    //assert(!isObject(expr),'expression for $not must be an object');
+
+    let usExp = new UsExpression(expr, parentUsExpr._resolve);
+
+    return () => {
+      return usExp.test()
+        .then((result) => {
+          return !result;
+        })
+
+    };
+  }
+};
+
+const SIMPLE_FUNCS = {
+  "$eq": (value, params) => (value === params),
+  "$neq": (value, params) => (value !== params),
+  "$gt": (value, params) => (value > params),
+  "$gte": (value, params) => (value >= params),
+  "$lt": (value, params) => (value < params),
+  "$lte": (value, params) => (value <= params),
+  "$in": (value, params) => (params.indexOf(value)>-1),
+  "$nin": (value, params) => (params.indexOf(value)==-1)
+}
+
 
 class UsExpression {
 
-  constructor(resolve) {
-    this._resolve = resolve;
-    this._funcs=DEFAULT_FUNCS;
+  constructor(query, resolve=null) {
 
-  }
-
-  registerFunc(name,func) {
-    this._funcs[name]=func;
-
-  }
-
-
-  isFunction(value) {
-    debug ('isFunction name', value.name)
-    return (this._funcs.hasOwnProperty(value.name));
-  }
-
-
-  _compileArray(expressionArray) {
-    assert(isArray(expressionArray), new Error('must be an array'));
-    return expressionArray.map((expression) => this._compile(expression));
-  }
-
-  _compileObject(funcObject) {
-    assert(typeof funcObject ==='object', new Error('must be an object'));
-    let keys = Object.keys(funcObject);
-    assert(keys.length === 1, new Error('can only have one property'));
-
-    let func = this._parseFunction(keys[0]);
-    let parameter = funcObject[keys[0]];
-
-    if (func.name === "$and" || func.name === "$or") {
-      let arrayOfFunctions = this._compileArray(parameter);
-
-      return ((value) => {
-        return this._parseValue(value)
-          .then((value) => (func(value,arrayOfFunctions)));
-      });
-
+    if (resolve) {
+      this._resolve = resolve;
     }
-    else {
-      return ((value) => {
-        return this._parse(parameter)
-        .then((paramValue) => {
-          return this._parse(value)
-            .then((value) => func(value, paramValue));
-        });
-      });
-
-    }
-
-
+    this._test = this.compile(query);
   }
 
-
-  _compileValueExpression(expression) {
-    return ((value) => {
-      return this._parseValue(expression)
-        .then((expressionValue) => {
-          debug('Value', value);
-          return this._parseValue(value)
-            .then((value) => (value===expressionValue));
-
-        })
-    });
-  }
-
-  _compile(expression) {
-    if (isArray(expression)) {
-      return this._compileArray(expression)
-    }
-    else if (typeof expression === 'object') {
-      return this._compileObject(expression);
-    }
-    else {
-      return this._compileValueExpression(expression);
-    }
-
-  }
 
   _parseArray(valueArr) {
-
     return Promise.resolve()
       .then(() => {
         assert(isArray(valueArr),new Error('must be an array'));
-        return Promise.all(valueArr.map((value) => (this._parse(value))));
+        return Promise.all(valueArr.map((value) => (this._parseValue(value))));
 
       });
-
-
   }
 
-  _parseObject(valueObject) {
-    return valueObject;
-  }
 
   _parseFunction(functionName) {
-    return this._funcs[functionName];
-  }
-
-  _parseStaticValue(value) {
-    let retVal;
-
-    try {
-      let parseResult =JSON.parse(value);
-      retVal = parseResult;
-    }
-    catch (e) {
-      retVal = value;
-    }
-    return retVal;
-
+    let retFunc = SIMPLE_FUNCS[functionName];
+    assert(!isUndefined(retFunc),
+      new Error(`operator ${functionName} not supported`));
+    return retFunc;
   }
 
   _parseValue(value) {
     let retVal;
+
+    if (isArray(value)) {
+      return this._parseArray(value);
+    }
 
     try {
       let parseResult =Promise.resolve(JSON.parse(value));
@@ -206,21 +147,88 @@ class UsExpression {
     return retVal;
 
   }
+  _compileLogicalOperator(op, expr) {
+    debug ('Operation %s  expr:',op,expr);
 
-  _parse(value) {
-    if (isArray(value)) {
-      return this._parseArray(value);
+    return LOGICAL_FUNCS[op](expr,this);
+
+
+  }
+
+  _compileSimpleOperator(field, op, expr) {
+
+    debug ('Field %s op:%s expr:%s',field,op,expr);
+
+    let func = this._parseFunction(op);
+
+    return (() => {
+      return this._parseValue(expr)
+      .then((val2) => {
+        return this._parseValue(field)
+          .then((val1) => func(val1,val2));
+      });
+    });
+
+  }
+
+  _normalize(expr) {
+    if (isSimpleType(expr)) {
+      return {'$eq': expr}
     }
-    else if (typeof value === 'object') {
-      return this._parseObject(value);
-    }
-    else {
-      let retVal = this._parseFunction(value);
-      if (typeof retVal === 'undefined') {
-        retVal = this._parseValue(value)
+
+    return expr;
+  }
+
+  compile(query) {
+    let compiled =[];
+    assert (isObject(query),new Error('query must be an object'));
+    assert (!isArray(query),new Error('query must not be an array'));
+    let expr;
+    for (let field in query) {
+      if (query.hasOwnProperty(field)) {
+        expr = query[field]
+        if (LOGICAL_FUNCS.hasOwnProperty(field)) {
+          compiled.push(this._compileLogicalOperator(field,expr));
+        }
+        else {
+         // normalize expression
+          expr = this._normalize(expr);
+
+          for (let op in expr) {
+            if (expr.hasOwnProperty(op)) {
+              compiled.push(
+                this._compileSimpleOperator(field, op, expr[op])
+              );
+            }
+          }
+        }
       }
-      return retVal;
     }
+
+    debug ('%d operations in array',compiled.length);
+    return () => {
+      return compiled.reduce((previous, current, index) => {
+        return previous                                    // initiates the promise chain
+          .then((curResult) => {
+            if (curResult) {
+              debug ('Still true - going on')
+              return current();
+            }
+            else {
+              return false;
+            }
+          })
+      }, Promise.resolve(true));
+
+    };
+
+  }
+
+  get test() {
+    if (isUndefined(this._test)) {
+      this._test = this.compile();
+    }
+    return this._test;
   }
 
 
