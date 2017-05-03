@@ -32,7 +32,8 @@ const variables = {
   foo: true,
   bar: false,
   baz: 6,
-  testString:'test'
+  testString:'test',
+  'test/ /test':{foo:{bar:'HELLO WORLD'}}
 
 }
 function resolve(varName) {
@@ -45,6 +46,21 @@ describe('USExpression', function () {
 
   before( function () {
     this.exp = new USExpression({},resolve);
+  });
+
+  describe('resolving capabilities', function (){
+
+    it('resolves an object',function (){
+      return expect(this.exp._resolve('test/ /test')).to.become({foo:{bar:'HELLO WORLD'}});
+
+    });
+    it('resolves an object with path access',function (){
+      return expect(this.exp._resolve('test/ /test[foo]')).to.become({bar:'HELLO WORLD'});
+    });
+    it('resolves an object with deep path access',function (){
+      return expect(this.exp._resolve('test/ /test[foo.bar]')).to.become('HELLO WORLD');
+    });
+
   });
 
   describe('_normalize function',function (){
@@ -149,6 +165,11 @@ describe('USExpression', function () {
           {true:'bar'},
           {true:true}]}});
       return expect(result()).to.become(false);
+    });
+    it('handles path accessed fields operations',function (){
+      let result = this.exp.compile(
+        {'test/ /test[foo.bar]':'"HELLO WORLD"'});
+      return expect(result()).to.become(true);
     });
 
   });

@@ -3,6 +3,7 @@
 
 const assert = require('assert');
 const debug = require('debug')('us.expression');
+const objectPath = require("object-path");
 
 
 function isPromise(value) {
@@ -33,6 +34,10 @@ function isSimpleType(expr) {
     type==='boolean'
   );
 }
+
+
+const MATCH_NAME = /([^\[]*)/;
+const MATCH_BRACKETS = /\[([^\]]+)]/;
 
 
 const LOGICAL_FUNCS = {
@@ -118,17 +123,37 @@ class UsExpression {
     this._test = this.compile(query);
   }
 
-  _cachedResolve(value) {
+  _cachedResolve(fieldAccessor) {
+
+    let value = fieldAccessor.match(MATCH_NAME).shift();
+    let accessor = fieldAccessor.match(MATCH_BRACKETS);
+
+
     let cachedValue = this._valueCache[value];
+    let retPromise;
     if (!isUndefined(cachedValue)) {
       debug('Using cache %s', value)
-      return Promise.resolve(cachedValue);
+      retPromise= Promise.resolve(cachedValue);
     }
-    return this.$$resolve$$(value)
+    else {
+      retPromise = this.$$resolve$$(value)
       .then((resolveValue) => {
         debug('Resolving %s',value);
         this._valueCache[value]=resolveValue;
         return resolveValue;
+      });
+    }
+    return retPromise
+      .then((value) => {
+        if (accessor) {
+          debug ('Access value %j with path %s',value, accessor[1]);
+          return objectPath.get(value,accessor[1]);
+
+        }
+        else {
+          return value;
+        }
+
       });
   }
 
