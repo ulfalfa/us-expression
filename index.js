@@ -40,62 +40,6 @@ const MATCH_NAME = /([^\[]*)/;
 const MATCH_BRACKETS = /\[([^\]]+)]/;
 
 
-const LOGICAL_FUNCS = {
-  "$and": (exprArr,parentUsExpr) => {
-    assert(isArray(exprArr),'expression for $and must be an array');
-
-    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve,false)));
-
-    return () => {
-      return queries.reduce((previous, current, index) => {
-        return previous
-          .then((curResult) => {
-            if (curResult) {
-              return current.test();
-            }
-            else {
-              return false;
-            }
-          })
-      },(Promise.resolve(true)));
-
-    };
-  },
-  "$or": (exprArr,parentUsExpr) => {
-    assert(isArray(exprArr),'expression for $or must be an array');
-
-    let queries = exprArr.map((expr) => (new UsExpression(expr, parentUsExpr._resolve,false)));
-
-    return () => {
-      return queries.reduce((previous, current, index) => {
-        return previous
-          .then((curResult) => {
-            if (!curResult) {
-              return current.test();
-            }
-            else {
-              return true;
-            }
-          })
-      },(Promise.resolve(false)));
-
-    };
-  },
-  "$not": (expr,parentUsExpr) => {
-    //assert(!isObject(expr),'expression for $not must be an object');
-
-    let usExp = new UsExpression(expr, parentUsExpr._resolve,false);
-
-    return () => {
-      return usExp.test()
-        .then((result) => {
-          return !result;
-        })
-
-    };
-  }
-};
-
 const SIMPLE_FUNCS = {
   "$eq": (value, params) => (value === params),
   "$neq": (value, params) => (value !== params),
@@ -110,21 +54,97 @@ const SIMPLE_FUNCS = {
 
 class UsExpression {
 
-  constructor(query={}, resolveFunc,caching=true) {
+  constructor(resolveFunc,caching=true) {
 
     assert(isFunction(resolveFunc),new Error('resolve function missing'));
+
+
+    this.LOGICAL_FUNCS = {
+      "$and": (exprArr) => {
+        assert(isArray(exprArr),'expression for $and must be an array');
+
+        let queries = exprArr.map((expr) => (this.compile(expr)));
+
+        return () => {
+          return queries.reduce((previous, current, index) => {
+            return previous
+              .then((curResult) => {
+                if (curResult) {
+                  return current();
+                }
+                else {
+                  return false;
+                }
+              })
+          },(Promise.resolve(true)));
+
+        };
+      },
+      "$or": (exprArr) => {
+        assert(isArray(exprArr),'expression for $or must be an array');
+
+        let queries = exprArr.map((expr) => (this.compile(expr)));
+
+        return () => {
+          return queries.reduce((previous, current, index) => {
+            return previous
+              .then((curResult) => {
+                if (!curResult) {
+                  return current();
+                }
+                else {
+                  return true;
+                }
+              })
+          },(Promise.resolve(false)));
+
+        };
+      },
+      "$not": (expr) => {
+        //assert(!isObject(expr),'expression for $not must be an object');
+
+        let compiled = this.compile(expr);
+
+        return () => {
+          return compiled()
+            .then((result) => {
+              return !result;
+            })
+
+        };
+      }
+    };
+
+    this._funcs={};
+    for (let func in SIMPLE_FUNCS) {
+      if (SIMPLE_FUNCS.hasOwnProperty(func)) {
+        this.registerFunction(func, SIMPLE_FUNCS[func]);
+
+      }
+    }
+
+
     this._valueCache={};
+    this._fields = [];
     this.$$resolve$$ = resolveFunc;
 
     this._resolve = (value) => {
       return caching ? this._cachedResolve(value) : resolveFunc(value);
     };
 
-    this._test = this.compile(query);
+  }
+
+  registerFunction(op, func) {
+    this._funcs[op] =  (field,expr) => ((() => {
+      return this._parseValue(expr)
+          .then((val2) => {
+            return this._parseValue(field)
+              .then((val1) => func(val1,val2));
+          });
+    }));
   }
 
   _cachedResolve(fieldAccessor) {
-
     let value = fieldAccessor.match(MATCH_NAME).shift();
     let accessor = fieldAccessor.match(MATCH_BRACKETS);
 
@@ -172,12 +192,21 @@ class UsExpression {
       });
   }
 
+  get fields() {
+    return this._fields;
+  }
 
-  _parseFunction(functionName) {
-    let retFunc = SIMPLE_FUNCS[functionName];
-    assert(!isUndefined(retFunc),
-      new Error(`operator ${functionName} not supported`));
-    return retFunc;
+  _addField(field) {
+    try {
+      JSON.parse(field);
+    }
+    catch (e) {
+      let value = field.match(MATCH_NAME).shift();
+      if (this._fields.indexOf(value)==-1) {
+        debug ('Adding field', value, this._fields.length);
+        this._fields.push(value);
+      }
+    }
   }
 
   _parseValue(value) {
@@ -186,6 +215,11 @@ class UsExpression {
     if (isArray(value)) {
       return this._parseArray(value);
     }
+
+    if (isObject(value)) {
+      return Promise.resolve(value);
+    }
+
 
     try {
       let parseResult =Promise.resolve(JSON.parse(value));
@@ -200,25 +234,17 @@ class UsExpression {
   }
   _compileLogicalOperator(op, expr) {
     debug ('Compiling %s(%j)',op,expr);
-
-    return LOGICAL_FUNCS[op](expr,this);
-
-
+    return this.LOGICAL_FUNCS[op](expr);
   }
 
   _compileSimpleOperator(field, op, expr) {
 
     debug ('Compiling %s(%s,%s)',op,field,expr);
 
-    let func = this._parseFunction(op);
-
-    return (() => {
-      return this._parseValue(expr)
-      .then((val2) => {
-        return this._parseValue(field)
-          .then((val1) => func(val1,val2));
-      });
-    });
+    let retFunc = this._funcs[op];
+    assert(!isUndefined(retFunc),
+      new Error(`operator ${op} not supported`));
+    return retFunc(field,expr);
 
   }
 
@@ -238,7 +264,7 @@ class UsExpression {
     for (let field in query) {
       if (query.hasOwnProperty(field)) {
         expr = query[field]
-        if (LOGICAL_FUNCS.hasOwnProperty(field)) {
+        if (this.LOGICAL_FUNCS.hasOwnProperty(field)) {
           compiled.push(this._compileLogicalOperator(field,expr));
         }
         else {
@@ -247,6 +273,7 @@ class UsExpression {
 
           for (let op in expr) {
             if (expr.hasOwnProperty(op)) {
+              this._addField(field);
               compiled.push(
                 this._compileSimpleOperator(field, op, expr[op])
               );
@@ -256,7 +283,7 @@ class UsExpression {
       }
     }
 
-    return () => {
+    let compiledFunction = (options={}) => {
       return compiled.reduce((previous, current, index) => {
         return previous                                    // initiates the promise chain
           .then((curResult) => {
@@ -267,17 +294,22 @@ class UsExpression {
               return false;
             }
           })
-      }, Promise.resolve(true));
+      }, Promise.resolve(true))
+      .then((result) => {
+        if (options.resetCache) {
+          this.resetCache();
+        }
+        return result;
+      });
 
     };
 
-  }
+    compiledFunction.fields = this.fields;
 
-  get test() {
-    if (isUndefined(this._test)) {
-      this._test = this.compile();
-    }
-    return this._test;
+
+    return compiledFunction;
+
+
   }
 
 

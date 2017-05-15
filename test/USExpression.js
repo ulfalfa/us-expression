@@ -33,7 +33,8 @@ const variables = {
   bar: false,
   baz: 6,
   testString:'test',
-  'test/ /test':{foo:{bar:'HELLO WORLD'}}
+  'test/ /test':{foo:{bar:'HELLO WORLD'}},
+  'test/state':{val:'true',old:'true',ts:123,lc:234}
 
 }
 function resolve(varName) {
@@ -45,7 +46,7 @@ describe('USExpression', function () {
   const USExpression  = require('../index');
 
   before( function () {
-    this.exp = new USExpression({},resolve);
+    this.exp = new USExpression(resolve);
   });
 
   describe('resolving capabilities', function (){
@@ -172,5 +173,34 @@ describe('USExpression', function () {
       return expect(result()).to.become(true);
     });
 
+    it('can register custom functions',function (){
+
+      //let result = this.exp.compile({'test/state[old]':{$neq:'test/state[val]'}});
+      this.exp.registerFunction ('$changed',(value, params) => {
+        debug ('params', params);
+        return value.val !== value.old;
+      });
+      let result = this.exp.compile({'test/state':{$changed:['baz','"TEST"']}});
+
+      return expect(result()).to.become(false);
+    });
+
+  });
+
+  describe.only('listing used variables', function () {
+
+
+    it ('lists uses variables after compile', function () {
+      variables.foo = true;
+      variables.bar = false;
+      variables.baz = 6;
+      variables.testString = 'test';
+      variables.testObj = {val:'foobar',old:'baz'};
+      let Exp = new USExpression(resolve);
+      let expression = Exp.compile({$and:[{true:false},{'testObj[val]':'"foobar"'},{'testObj[old]':'"baz"'},{true:true},{foo:true},{bar:false},{baz:6},{testString:'"test"'}]});
+      expect(expression.fields).to.be.deep.equal(['testObj','foo','bar','baz','testString']);
+      return expect(expression()).to.become(false);
+
+    });
   });
 })
